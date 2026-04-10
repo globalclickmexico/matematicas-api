@@ -20,11 +20,11 @@ dotenv.config();
 // });
 
 const pool = mysql.createPool({
-  host:     process.env.DB_HOST     || '75.102.23.17',
-  port:     Number(process.env.DB_PORT) || 3306,
-  user:     process.env.DB_USER     || 'clickplus_regularizacion',
-  password: process.env.DB_PASSWORD || 'Gl0b4lClick@2026',
-  database: process.env.DB_NAME     || 'clickplus_matematicas_qa',
+  host:    '75.102.23.17',
+  port:     3306,
+  user:     'clickplus_regularizacion',
+  password: 'Gl0b4lClick@2026',
+  database: 'clickplus_matematicas_qa',
   waitForConnections: true,
   connectionLimit:    20,
   queueLimit:         0,
