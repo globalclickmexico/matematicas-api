@@ -6,7 +6,7 @@ import { RowDataPacket } from 'mysql2';
 /* Base URL donde están alojados los HTMLs/PDFs de las lecciones.
    Las URLs se construyen como: {BASE}/{tipo}/{codigoLeccion}       */
 const CONTENIDO_BASE = process.env.CONTENIDO_BASE_URL
-  ?? 'https://globalclickmexico.com/pruebas/matematicas';
+  ?? 'https://globalclickmexico.com/regularizacion-matematicas/matematicas';
 
 function buildUrls(codigoLeccion: string) {
   return {
