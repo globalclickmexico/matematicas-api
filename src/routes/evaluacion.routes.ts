@@ -5,7 +5,7 @@ import { authMiddleware } from '../middlewares/auth.middleware';
 const router: Router = Router();
 
 // POST /api/evaluaciones/leccion/:idLeccion             — enviar y calificar
-router.post('/leccion/:idLeccion',          authMiddleware, enviarEvaluacion);
+router.post('/leccion/:idSeccion/:idLeccion',          authMiddleware, enviarEvaluacion);
 
 // GET  /api/evaluaciones/leccion/:idLeccion/historial   — historial del alumno
 router.get('/leccion/:idLeccion/historial', authMiddleware, getHistorial);

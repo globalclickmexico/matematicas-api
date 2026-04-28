@@ -14,15 +14,24 @@ function buildUrls(codigoLeccion: string) {
     pdfUrl:        `${CONTENIDO_BASE}/${codigoLeccion}/${codigoLeccion}.pdf`,
   };
 }
-
-/* ── GET /api/ejes ──────────────────────────────────────────
-   Árbol completo del curso del alumno:
-   ejes → secciones → lecciones + progreso del alumno         */
+/* ══════════════════════════════════════════════════════════
+   GET /api/ejes
+ 
+   Devuelve el árbol del curso con acceso progresivo por eje:
+   · Eje 1 nunca completado  → solo eje 1
+   · Eje 1 completado        → eje 1 + eje 2
+   · Eje 2 completado        → eje 1 + eje 2 + eje 3
+ 
+   Cada sección incluye:
+   · Sus lecciones con progreso del alumno
+   · Su evaluación de sección (preguntas sin respuesta correcta)
+   · El último resultado del alumno en esa evaluación
+══════════════════════════════════════════════════════════ */
 export async function getEjes(req: Request, res: Response) {
   try {
     const usuarioId = req.usuario!.sub;
-
-    /* 1. Obtener el idCurso de la ruta del alumno */
+ 
+    /* ── 1. idCurso de la ruta del alumno ─────────────────── */
     const [rutaRows] = await pool.query<RowDataPacket[]>(
       `SELECT ra.idCurso
        FROM rutas_aprendizaje ra
@@ -33,30 +42,68 @@ export async function getEjes(req: Request, res: Response) {
     );
     if (!rutaRows[0]) return notFound(res, 'El usuario no tiene una ruta asignada');
     const idCurso = (rutaRows[0] as any).idCurso;
-
-    /* 2. Ejes del curso */
-    const [ejes] = await pool.query<RowDataPacket[]>(
+ 
+    /* ── 2. Todos los ejes del curso (ordenados) ──────────── */
+    const [ejesRows] = await pool.query<RowDataPacket[]>(
       `SELECT idEje, codigoEje, nombre, descripcion, cantidadSecciones
        FROM ejes
        WHERE idCurso = ? AND estatus = 1
-       ORDER BY idEje`,
+       ORDER BY idEje ASC`,
       [idCurso]
     );
-
-    /* 3. Secciones */
-    const [secciones] = await pool.query<RowDataPacket[]>(
+    const todosLosEjes = ejesRows as any[];
+    if (!todosLosEjes.length) return ok(res, []);
+ 
+    /* ── 3. Secciones realizadas por el alumno ────────────── */
+    const [secRealizadasRows] = await pool.query<RowDataPacket[]>(
+      `SELECT idSeccion
+       FROM secciones_realizadas
+       WHERE idUsuario = ? AND idCurso = ?`,
+      [usuarioId, idCurso]
+    );
+    const secRealizadasSet = new Set(
+      (secRealizadasRows as any[]).map(s => s.idSeccion)
+    );
+ 
+    /* ── 4. Secciones de todos los ejes ───────────────────── */
+    const [seccionesRows] = await pool.query<RowDataPacket[]>(
       `SELECT s.idSeccion, s.idEje, s.nombre, s.codigoSeccion,
               s.nivel, s.cantidadLecciones
        FROM secciones s
        JOIN ejes e ON e.idEje = s.idEje
        WHERE e.idCurso = ? AND s.estatus = 1
-       ORDER BY s.idSeccion`,
+       ORDER BY s.idSeccion ASC`,
       [idCurso]
     );
-
-    /* 4. Lecciones con progreso del alumno */
-    const [lecciones] = await pool.query<RowDataPacket[]>(
-      `SELECT
+    const todasLasSecciones = seccionesRows as any[];
+ 
+    /* ── 5. Determinar qué ejes están completados ─────────── */
+    //  Un eje está completo cuando TODAS sus secciones están realizadas
+    const ejeCompletadoMap = new Map<number, boolean>();
+ 
+    for (const eje of todosLosEjes) {
+      const seccionesDelEje = todasLasSecciones.filter(s => s.idEje === eje.idEje);
+      const todasRealizadas = seccionesDelEje.length > 0
+        && seccionesDelEje.every(s => secRealizadasSet.has(s.idSeccion));
+      ejeCompletadoMap.set(eje.idEje, todasRealizadas);
+    }
+ 
+    /* ── 6. Calcular cuántos ejes mostrar (acceso progresivo) */
+    //  Regla: mostrar los N primeros ejes donde el último
+    //  en completarse desbloquea el siguiente.
+    //  Siempre se muestra al menos el primer eje.
+    let ejesAMostrar = 1;
+    for (let i = 0; i < todosLosEjes.length - 1; i++) {
+      if (ejeCompletadoMap.get(todosLosEjes[i].idEje)) {
+        ejesAMostrar = i + 2; // desbloquear el siguiente
+      }
+    }
+    const ejesFiltrados = todosLosEjes.slice(0, ejesAMostrar);
+    const idEjesFiltrados = ejesFiltrados.map(e => e.idEje);
+ 
+    /* ── 7. Lecciones con progreso ────────────────────────── */
+    const [leccionesRows] = await pool.query<RowDataPacket[]>(
+      `SELECT DISTINCT
          l.idLeccion,
          l.idSeccion,
          l.nombre,
@@ -64,69 +111,169 @@ export async function getEjes(req: Request, res: Response) {
          CASE WHEN lv.idLeccion IS NOT NULL THEN 1 ELSE 0 END AS vista
        FROM lecciones l
        JOIN secciones s ON s.idSeccion = l.idSeccion
-       JOIN ejes      e ON e.idEje     = s.idEje
        LEFT JOIN lecciones_vistas lv
               ON lv.idLeccion = l.idLeccion
              AND lv.idUsuario = ?
              AND lv.idCurso   = ?
-       WHERE e.idCurso = ?
-       ORDER BY l.idLeccion`,
-      [usuarioId, idCurso, idCurso]
+       WHERE s.idEje IN (${idEjesFiltrados.join(',')})
+       ORDER BY l.idLeccion ASC`,
+      [usuarioId, idCurso]
     );
-
-    /* 5. Total de preguntas por lección */
-    const [preguntaCount] = await pool.query<RowDataPacket[]>(
+ 
+    /* ── 8. Total de preguntas por lección ────────────────── */
+    const [pregLecRows] = await pool.query<RowDataPacket[]>(
       `SELECT idLeccion, COUNT(*) AS totalPreguntas
        FROM preguntas
        WHERE estatus = 1
        GROUP BY idLeccion`
     );
-    const pregMap = new Map(
-      (preguntaCount as any[]).map(p => [p.idLeccion, p.totalPreguntas])
+    const pregLecMap = new Map(
+      (pregLecRows as any[]).map(p => [p.idLeccion, Number(p.totalPreguntas)])
     );
-
-    /* 6. Secciones realizadas por el alumno */
-    const [secRealizadas] = await pool.query<RowDataPacket[]>(
-      `SELECT idSeccion FROM secciones_realizadas
-       WHERE idUsuario = ? AND idCurso = ?`,
-      [usuarioId, idCurso]
+ 
+    /* ── 9. Preguntas de evaluación por sección ───────────── */
+    //  Solo trae idPregunta, pregunta, tipoPregunta y opciones
+    //  → respuestaCorrecta NUNCA se envía al frontend
+    const [pregSecRows] = await pool.query<RowDataPacket[]>(
+      `SELECT
+         p.idPregunta,
+         p.idSeccion,
+         p.pregunta,
+         p.imagenPregunta,
+         p.tipoPregunta,
+         p.opcionesRespuesta
+       FROM preguntas p
+       JOIN secciones s ON s.idSeccion = p.idSeccion
+       WHERE s.idEje IN (${idEjesFiltrados.join(',')})
+         AND p.estatus = 1
+         AND p.idLeccion IS NULL   -- preguntas de sección, no de lección individual
+       ORDER BY p.idSeccion, p.idPregunta ASC`,
+      []
     );
-    const secRealizadasSet = new Set(
-      (secRealizadas as any[]).map(s => s.idSeccion)
+ 
+    /* ── 9b. Si en tu BD todas las preguntas tienen idLeccion,
+             filtra por sección usando solo idSeccion           */
+    //  Fallback: tomar TODAS las preguntas de la sección
+    let pregSecFinal = pregSecRows as any[];
+    if (!pregSecFinal.length) {
+      const [pregSecFallback] = await pool.query<RowDataPacket[]>(
+        `SELECT
+           p.idPregunta,
+           p.idSeccion,
+           p.pregunta,
+           p.imagenPregunta,
+           p.tipoPregunta,
+           p.opcionesRespuesta
+         FROM preguntas p
+         JOIN secciones s ON s.idSeccion = p.idSeccion
+         WHERE s.idEje IN (${idEjesFiltrados.join(',')})
+           AND p.estatus = 1
+         ORDER BY p.idSeccion, p.idPregunta ASC`,
+        []
+      );
+      pregSecFinal = pregSecFallback as any[];
+    }
+ 
+    /* ── 10. Último resultado de evaluación por sección ──── */
+    const [evalRows] = await pool.query<RowDataPacket[]>(
+      `SELECT
+         es.idSeccion,
+         es.calificacion,
+         es.fechaRealizacion,
+         CASE WHEN es.calificacion >= 70 THEN 1 ELSE 0 END AS aprobada
+       FROM evaluaciones_seccion es
+       WHERE es.idUsuario = ?
+         AND es.idSeccion IN (
+           SELECT s.idSeccion FROM secciones s
+           WHERE s.idEje IN (${idEjesFiltrados.join(',')})
+         )
+       ORDER BY es.fechaRealizacion DESC`,
+      [usuarioId]
     );
-
-    /* 7. Ensamblar árbol */
-    const leccionesEnriquecidas = (lecciones as any[]).map(l => ({
+ 
+    // Quedarse solo con la evaluación más reciente por sección
+    const evalMap = new Map<number, any>();
+    for (const ev of evalRows as any[]) {
+      if (!evalMap.has(ev.idSeccion)) {
+        evalMap.set(ev.idSeccion, {
+          calificacion:      ev.calificacion,
+          aprobada:          Boolean(ev.aprobada),
+          fechaRealizacion:  ev.fechaRealizacion,
+        });
+      }
+    }
+ 
+    /* ── 11. Ensamblar árbol final ────────────────────────── */
+    const leccionesEnriquecidas = (leccionesRows as any[]).map(l => ({
       idLeccion:      l.idLeccion,
       idSeccion:      l.idSeccion,
       nombre:         l.nombre,
       codigoLeccion:  l.codigoLeccion,
       ...buildUrls(l.codigoLeccion),
       vista:          Boolean(l.vista),
-      totalPreguntas: pregMap.get(l.idLeccion) ?? 0,
+      totalPreguntas: pregLecMap.get(l.idLeccion) ?? 0,
     }));
-
-    const seccionesEnriquecidas = (secciones as any[]).map(s => ({
-      idSeccion:         s.idSeccion,
-      idEje:             s.idEje,
-      nombre:            s.nombre,
-      codigoSeccion:     s.codigoSeccion,
-      nivel:             s.nivel,
-      cantidadLecciones: s.cantidadLecciones,
-      realizada:         secRealizadasSet.has(s.idSeccion),
-      lecciones:         leccionesEnriquecidas.filter(l => l.idSeccion === s.idSeccion),
-    }));
-
-    const arbol = (ejes as any[]).map(e => ({
+ 
+    const seccionesEnriquecidas = todasLasSecciones
+      .filter(s => idEjesFiltrados.includes(s.idEje))
+      .map(s => {
+        const preguntasSeccion = pregSecFinal
+          .filter(p => p.idSeccion === s.idSeccion)
+          .map(p => ({
+            idPregunta:        p.idPregunta,
+            pregunta:          p.pregunta,
+            imagenPregunta:    p.imagenPregunta ?? null,
+            tipoPregunta:      p.tipoPregunta,
+            // Parsear JSON si viene como string
+            opciones: Array.isArray(p.opcionesRespuesta)
+              ? p.opcionesRespuesta
+              : (() => { try { return JSON.parse(p.opcionesRespuesta ?? '[]'); } catch { return []; } })(),
+            // respuestaCorrecta ← NUNCA se incluye
+          }));
+ 
+        return {
+          idSeccion:          s.idSeccion,
+          idEje:              s.idEje,
+          nombre:             s.nombre,
+          codigoSeccion:      s.codigoSeccion,
+          nivel:              s.nivel,
+          cantidadLecciones:  s.cantidadLecciones,
+          realizada:          secRealizadasSet.has(s.idSeccion),
+          lecciones:          leccionesEnriquecidas.filter(l => l.idSeccion === s.idSeccion),
+          // Evaluación de la sección
+          evaluacionSeccion: {
+            totalPreguntas: preguntasSeccion.length,
+            preguntas:      preguntasSeccion,
+            ultimoResultado: evalMap.get(s.idSeccion) ?? null,
+          },
+        };
+      });
+ 
+    const arbol = ejesFiltrados.map((e, idx) => ({
       idEje:             e.idEje,
       codigoEje:         e.codigoEje,
       nombre:            e.nombre,
       descripcion:       e.descripcion,
       cantidadSecciones: e.cantidadSecciones,
+      completado:        ejeCompletadoMap.get(e.idEje) ?? false,
+      // Indica si este eje está disponible o es "el siguiente por desbloquear"
+      disponible:        true,
       secciones:         seccionesEnriquecidas.filter(s => s.idEje === e.idEje),
     }));
-
-    return ok(res, arbol);
+ 
+    /* ── 12. Agregar info de ejes bloqueados (sin contenido) */
+    const ejesBloqueados = todosLosEjes.slice(ejesAMostrar).map(e => ({
+      idEje:             e.idEje,
+      codigoEje:         e.codigoEje,
+      nombre:            e.nombre,
+      descripcion:       e.descripcion,
+      cantidadSecciones: e.cantidadSecciones,
+      completado:        false,
+      disponible:        false,  // ← bloqueado, el frontend puede mostrarlo dimmed
+      secciones:         [],     // sin contenido hasta que se desbloquee
+    }));
+ 
+    return ok(res, [...arbol, ...ejesBloqueados]);
   } catch (err) {
     return serverError(res, err);
   }
