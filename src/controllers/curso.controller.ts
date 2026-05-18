@@ -14,6 +14,35 @@ function buildUrls(codigoLeccion: string) {
     pdfUrl:        `${CONTENIDO_BASE}/${codigoLeccion}/${codigoLeccion}.pdf`,
   };
 }
+
+/* ── Helper: parsear el campo lecciones de la ruta ──────────
+   Soporta dos formatos:
+   · Formato estándar (seed):   [1, 2, 3, 4]
+   · Formato diagnóstico:       [{ nombre, codigoLeccion }, ...]
+   Devuelve siempre un Set de códigos de lección o null si
+   es formato estándar (significa "mostrar todo el curso")    */
+interface LeccionRuta { nombre: string; codigoLeccion: string; }
+ 
+function parsearLeccionesRuta(raw: any): Set<string> | null {
+  let parsed: any;
+ 
+  if (typeof raw === 'string') {
+    try { parsed = JSON.parse(raw); } catch { return null; }
+  } else {
+    parsed = raw;
+  }
+ 
+  if (!Array.isArray(parsed) || parsed.length === 0) return null;
+ 
+  /* Formato nuevo: array de objetos con codigoLeccion */
+  if (typeof parsed[0] === 'object' && parsed[0] !== null && 'codigoLeccion' in parsed[0]) {
+    return new Set<string>((parsed as LeccionRuta[]).map(l => l.codigoLeccion));
+  }
+ 
+  /* Formato viejo: array de IDs → no filtrar por ruta */
+  return null;
+}
+
 /* ══════════════════════════════════════════════════════════
    GET /api/ejes
  
@@ -27,13 +56,265 @@ function buildUrls(codigoLeccion: string) {
    · Su evaluación de sección (preguntas sin respuesta correcta)
    · El último resultado del alumno en esa evaluación
 ══════════════════════════════════════════════════════════ */
+// export async function getEjes(req: Request, res: Response) {
+//   try {
+//     const usuarioId = req.usuario!.sub;
+ 
+//     /* ── 1. idCurso de la ruta del alumno ─────────────────── */
+//     const [rutaRows] = await pool.query<RowDataPacket[]>(
+//       `SELECT ra.idCurso
+//        FROM rutas_aprendizaje ra
+//        JOIN usuarios u ON u.idRuta = ra.idRuta
+//        WHERE u.idUsuario = ?
+//        LIMIT 1`,
+//       [usuarioId]
+//     );
+//     if (!rutaRows[0]) return notFound(res, 'El usuario no tiene una ruta asignada');
+//     const idCurso = (rutaRows[0] as any).idCurso;
+ 
+//     /* ── 2. Todos los ejes del curso (ordenados) ──────────── */
+//     const [ejesRows] = await pool.query<RowDataPacket[]>(
+//       `SELECT idEje, codigoEje, nombre, descripcion, cantidadSecciones
+//        FROM ejes
+//        WHERE idCurso = ? AND estatus = 1
+//        ORDER BY idEje ASC`,
+//       [idCurso]
+//     );
+//     const todosLosEjes = ejesRows as any[];
+//     if (!todosLosEjes.length) return ok(res, []);
+ 
+//     /* ── 3. Secciones realizadas por el alumno ────────────── */
+//     const [secRealizadasRows] = await pool.query<RowDataPacket[]>(
+//       `SELECT idSeccion
+//        FROM secciones_realizadas
+//        WHERE idUsuario = ? AND idCurso = ?`,
+//       [usuarioId, idCurso]
+//     );
+//     const secRealizadasSet = new Set(
+//       (secRealizadasRows as any[]).map(s => s.idSeccion)
+//     );
+ 
+//     /* ── 4. Secciones de todos los ejes ───────────────────── */
+//     const [seccionesRows] = await pool.query<RowDataPacket[]>(
+//       `SELECT s.idSeccion, s.idEje, s.nombre, s.codigoSeccion,
+//               s.nivel, s.cantidadLecciones
+//        FROM secciones s
+//        JOIN ejes e ON e.idEje = s.idEje
+//        WHERE e.idCurso = ? AND s.estatus = 1
+//        ORDER BY s.idSeccion ASC`,
+//       [idCurso]
+//     );
+//     const todasLasSecciones = seccionesRows as any[];
+ 
+//     /* ── 5. Determinar qué ejes están completados ─────────── */
+//     //  Un eje está completo cuando TODAS sus secciones están realizadas
+//     const ejeCompletadoMap = new Map<number, boolean>();
+ 
+//     for (const eje of todosLosEjes) {
+//       const seccionesDelEje = todasLasSecciones.filter(s => s.idEje === eje.idEje);
+//       const todasRealizadas = seccionesDelEje.length > 0
+//         && seccionesDelEje.every(s => secRealizadasSet.has(s.idSeccion));
+//       ejeCompletadoMap.set(eje.idEje, todasRealizadas);
+//     }
+ 
+//     /* ── 6. Calcular cuántos ejes mostrar (acceso progresivo) */
+//     //  Regla: mostrar los N primeros ejes donde el último
+//     //  en completarse desbloquea el siguiente.
+//     //  Siempre se muestra al menos el primer eje.
+//     let ejesAMostrar = 1;
+//     for (let i = 0; i < todosLosEjes.length - 1; i++) {
+//       if (ejeCompletadoMap.get(todosLosEjes[i].idEje)) {
+//         ejesAMostrar = i + 2; // desbloquear el siguiente
+//       }
+//     }
+//     const ejesFiltrados = todosLosEjes.slice(0, ejesAMostrar);
+//     const idEjesFiltrados = ejesFiltrados.map(e => e.idEje);
+ 
+//     /* ── 7. Lecciones con progreso ────────────────────────── */
+//     const [leccionesRows] = await pool.query<RowDataPacket[]>(
+//       `SELECT DISTINCT
+//          l.idLeccion,
+//          l.idSeccion,
+//          l.nombre,
+//          l.codigoLeccion,
+//          CASE WHEN lv.idLeccion IS NOT NULL THEN 1 ELSE 0 END AS vista
+//        FROM lecciones l
+//        JOIN secciones s ON s.idSeccion = l.idSeccion
+//        LEFT JOIN lecciones_vistas lv
+//               ON lv.idLeccion = l.idLeccion
+//              AND lv.idUsuario = ?
+//              AND lv.idCurso   = ?
+//        WHERE s.idEje IN (${idEjesFiltrados.join(',')})
+//        ORDER BY l.idLeccion ASC`,
+//       [usuarioId, idCurso]
+//     );
+ 
+//     /* ── 8. Total de preguntas por lección ────────────────── */
+//     const [pregLecRows] = await pool.query<RowDataPacket[]>(
+//       `SELECT idLeccion, COUNT(*) AS totalPreguntas
+//        FROM preguntas
+//        WHERE estatus = 1
+//        GROUP BY idLeccion`
+//     );
+//     const pregLecMap = new Map(
+//       (pregLecRows as any[]).map(p => [p.idLeccion, Number(p.totalPreguntas)])
+//     );
+ 
+//     /* ── 9. Preguntas de evaluación por sección ───────────── */
+//     //  Solo trae idPregunta, pregunta, tipoPregunta y opciones
+//     //  → respuestaCorrecta NUNCA se envía al frontend
+//     const [pregSecRows] = await pool.query<RowDataPacket[]>(
+//       `SELECT
+//          p.idPregunta,
+//          p.idSeccion,
+//          p.pregunta,
+//          p.imagenPregunta,
+//          p.tipoPregunta,
+//          p.opcionesRespuesta
+//        FROM preguntas p
+//        JOIN secciones s ON s.idSeccion = p.idSeccion
+//        WHERE s.idEje IN (${idEjesFiltrados.join(',')})
+//          AND p.estatus = 1
+//          AND p.idLeccion IS NULL   -- preguntas de sección, no de lección individual
+//        ORDER BY p.idSeccion, p.idPregunta ASC`,
+//       []
+//     );
+ 
+//     /* ── 9b. Si en tu BD todas las preguntas tienen idLeccion,
+//              filtra por sección usando solo idSeccion           */
+//     //  Fallback: tomar TODAS las preguntas de la sección
+//     let pregSecFinal = pregSecRows as any[];
+//     if (!pregSecFinal.length) {
+//       const [pregSecFallback] = await pool.query<RowDataPacket[]>(
+//         `SELECT
+//            p.idPregunta,
+//            p.idSeccion,
+//            p.pregunta,
+//            p.imagenPregunta,
+//            p.tipoPregunta,
+//            p.opcionesRespuesta
+//          FROM preguntas p
+//          JOIN secciones s ON s.idSeccion = p.idSeccion
+//          WHERE s.idEje IN (${idEjesFiltrados.join(',')})
+//            AND p.estatus = 1
+//          ORDER BY p.idSeccion, p.idPregunta ASC`,
+//         []
+//       );
+//       pregSecFinal = pregSecFallback as any[];
+//     }
+ 
+//     /* ── 10. Último resultado de evaluación por sección ──── */
+//     const [evalRows] = await pool.query<RowDataPacket[]>(
+//       `SELECT
+//          es.idSeccion,
+//          es.calificacion,
+//          es.fechaRealizacion,
+//          CASE WHEN es.calificacion >= 70 THEN 1 ELSE 0 END AS aprobada
+//        FROM evaluaciones_seccion es
+//        WHERE es.idUsuario = ?
+//          AND es.idSeccion IN (
+//            SELECT s.idSeccion FROM secciones s
+//            WHERE s.idEje IN (${idEjesFiltrados.join(',')})
+//          )
+//        ORDER BY es.fechaRealizacion DESC`,
+//       [usuarioId]
+//     );
+ 
+//     // Quedarse solo con la evaluación más reciente por sección
+//     const evalMap = new Map<number, any>();
+//     for (const ev of evalRows as any[]) {
+//       if (!evalMap.has(ev.idSeccion)) {
+//         evalMap.set(ev.idSeccion, {
+//           calificacion:      ev.calificacion,
+//           aprobada:          Boolean(ev.aprobada),
+//           fechaRealizacion:  ev.fechaRealizacion,
+//         });
+//       }
+//     }
+ 
+//     /* ── 11. Ensamblar árbol final ────────────────────────── */
+//     const leccionesEnriquecidas = (leccionesRows as any[]).map(l => ({
+//       idLeccion:      l.idLeccion,
+//       idSeccion:      l.idSeccion,
+//       nombre:         l.nombre,
+//       codigoLeccion:  l.codigoLeccion,
+//       ...buildUrls(l.codigoLeccion),
+//       vista:          Boolean(l.vista),
+//       totalPreguntas: pregLecMap.get(l.idLeccion) ?? 0,
+//     }));
+ 
+//     const seccionesEnriquecidas = todasLasSecciones
+//       .filter(s => idEjesFiltrados.includes(s.idEje))
+//       .map(s => {
+//         const preguntasSeccion = pregSecFinal
+//           .filter(p => p.idSeccion === s.idSeccion)
+//           .map(p => ({
+//             idPregunta:        p.idPregunta,
+//             pregunta:          p.pregunta,
+//             imagenPregunta:    p.imagenPregunta ?? null,
+//             tipoPregunta:      p.tipoPregunta,
+//             // Parsear JSON si viene como string
+//             opciones: Array.isArray(p.opcionesRespuesta)
+//               ? p.opcionesRespuesta
+//               : (() => { try { return JSON.parse(p.opcionesRespuesta ?? '[]'); } catch { return []; } })(),
+//             // respuestaCorrecta ← NUNCA se incluye
+//           }));
+ 
+//         return {
+//           idSeccion:          s.idSeccion,
+//           idEje:              s.idEje,
+//           nombre:             s.nombre,
+//           codigoSeccion:      s.codigoSeccion,
+//           nivel:              s.nivel,
+//           cantidadLecciones:  s.cantidadLecciones,
+//           realizada:          secRealizadasSet.has(s.idSeccion),
+//           lecciones:          leccionesEnriquecidas.filter(l => l.idSeccion === s.idSeccion),
+//           // Evaluación de la sección
+//           evaluacionSeccion: {
+//             totalPreguntas: preguntasSeccion.length,
+//             preguntas:      preguntasSeccion,
+//             ultimoResultado: evalMap.get(s.idSeccion) ?? null,
+//           },
+//         };
+//       });
+ 
+//     const arbol = ejesFiltrados.map((e, idx) => ({
+//       idEje:             e.idEje,
+//       codigoEje:         e.codigoEje,
+//       nombre:            e.nombre,
+//       descripcion:       e.descripcion,
+//       cantidadSecciones: e.cantidadSecciones,
+//       completado:        ejeCompletadoMap.get(e.idEje) ?? false,
+//       // Indica si este eje está disponible o es "el siguiente por desbloquear"
+//       disponible:        true,
+//       secciones:         seccionesEnriquecidas.filter(s => s.idEje === e.idEje),
+//     }));
+ 
+//     /* ── 12. Agregar info de ejes bloqueados (sin contenido) */
+//     const ejesBloqueados = todosLosEjes.slice(ejesAMostrar).map(e => ({
+//       idEje:             e.idEje,
+//       codigoEje:         e.codigoEje,
+//       nombre:            e.nombre,
+//       descripcion:       e.descripcion,
+//       cantidadSecciones: e.cantidadSecciones,
+//       completado:        false,
+//       disponible:        false,  // ← bloqueado, el frontend puede mostrarlo dimmed
+//       secciones:         [],     // sin contenido hasta que se desbloquee
+//     }));
+ 
+//     return ok(res, [...arbol, ...ejesBloqueados]);
+//   } catch (err) {
+//     return serverError(res, err);
+//   }
+// }
+
 export async function getEjes(req: Request, res: Response) {
   try {
     const usuarioId = req.usuario!.sub;
  
-    /* ── 1. idCurso de la ruta del alumno ─────────────────── */
+    /* ── 1. idCurso + lecciones de la ruta del alumno ─────── */
     const [rutaRows] = await pool.query<RowDataPacket[]>(
-      `SELECT ra.idCurso
+      `SELECT ra.idCurso, ra.nombre AS nombreRuta, ra.lecciones
        FROM rutas_aprendizaje ra
        JOIN usuarios u ON u.idRuta = ra.idRuta
        WHERE u.idUsuario = ?
@@ -41,9 +322,17 @@ export async function getEjes(req: Request, res: Response) {
       [usuarioId]
     );
     if (!rutaRows[0]) return notFound(res, 'El usuario no tiene una ruta asignada');
-    const idCurso = (rutaRows[0] as any).idCurso;
  
-    /* ── 2. Todos los ejes del curso (ordenados) ──────────── */
+    const { idCurso, nombreRuta, lecciones: leccionesRaw } = rutaRows[0] as any;
+ 
+    /* Determinar si la ruta es personalizada por diagnóstico */
+    const esRutaDiagnostico  = String(nombreRuta ?? '').startsWith('RUTA_DIAGNOSTICO_');
+    /* Set de codigosLeccion de la ruta (null = ruta estándar, mostrar todo) */
+    const codigosEnRuta: Set<string> | null = esRutaDiagnostico
+      ? parsearLeccionesRuta(leccionesRaw)
+      : null;
+ 
+    /* ── 2. Todos los ejes del curso ──────────────────────── */
     const [ejesRows] = await pool.query<RowDataPacket[]>(
       `SELECT idEje, codigoEje, nombre, descripcion, cantidadSecciones
        FROM ejes
@@ -65,7 +354,7 @@ export async function getEjes(req: Request, res: Response) {
       (secRealizadasRows as any[]).map(s => s.idSeccion)
     );
  
-    /* ── 4. Secciones de todos los ejes ───────────────────── */
+    /* ── 4. Todas las secciones del curso ─────────────────── */
     const [seccionesRows] = await pool.query<RowDataPacket[]>(
       `SELECT s.idSeccion, s.idEje, s.nombre, s.codigoSeccion,
               s.nivel, s.cantidadLecciones
@@ -77,29 +366,24 @@ export async function getEjes(req: Request, res: Response) {
     );
     const todasLasSecciones = seccionesRows as any[];
  
-    /* ── 5. Determinar qué ejes están completados ─────────── */
-    //  Un eje está completo cuando TODAS sus secciones están realizadas
+    /* ── 5. Determinar ejes completados ───────────────────── */
     const ejeCompletadoMap = new Map<number, boolean>();
- 
     for (const eje of todosLosEjes) {
-      const seccionesDelEje = todasLasSecciones.filter(s => s.idEje === eje.idEje);
-      const todasRealizadas = seccionesDelEje.length > 0
-        && seccionesDelEje.every(s => secRealizadasSet.has(s.idSeccion));
+      const secsEje         = todasLasSecciones.filter(s => s.idEje === eje.idEje);
+      const todasRealizadas = secsEje.length > 0
+        && secsEje.every(s => secRealizadasSet.has(s.idSeccion));
       ejeCompletadoMap.set(eje.idEje, todasRealizadas);
     }
  
-    /* ── 6. Calcular cuántos ejes mostrar (acceso progresivo) */
-    //  Regla: mostrar los N primeros ejes donde el último
-    //  en completarse desbloquea el siguiente.
-    //  Siempre se muestra al menos el primer eje.
+    /* ── 6. Acceso progresivo: cuántos ejes mostrar ───────── */
     let ejesAMostrar = 1;
     for (let i = 0; i < todosLosEjes.length - 1; i++) {
       if (ejeCompletadoMap.get(todosLosEjes[i].idEje)) {
-        ejesAMostrar = i + 2; // desbloquear el siguiente
+        ejesAMostrar = i + 2;
       }
     }
-    const ejesFiltrados = todosLosEjes.slice(0, ejesAMostrar);
-    const idEjesFiltrados = ejesFiltrados.map(e => e.idEje);
+    const ejesFiltrados    = todosLosEjes.slice(0, ejesAMostrar);
+    const idEjesFiltrados  = ejesFiltrados.map(e => e.idEje);
  
     /* ── 7. Lecciones con progreso ────────────────────────── */
     const [leccionesRows] = await pool.query<RowDataPacket[]>(
@@ -132,38 +416,24 @@ export async function getEjes(req: Request, res: Response) {
     );
  
     /* ── 9. Preguntas de evaluación por sección ───────────── */
-    //  Solo trae idPregunta, pregunta, tipoPregunta y opciones
-    //  → respuestaCorrecta NUNCA se envía al frontend
     const [pregSecRows] = await pool.query<RowDataPacket[]>(
-      `SELECT
-         p.idPregunta,
-         p.idSeccion,
-         p.pregunta,
-         p.imagenPregunta,
-         p.tipoPregunta,
-         p.opcionesRespuesta
+      `SELECT p.idPregunta, p.idSeccion, p.pregunta,
+              p.imagenPregunta, p.tipoPregunta, p.opcionesRespuesta
        FROM preguntas p
        JOIN secciones s ON s.idSeccion = p.idSeccion
        WHERE s.idEje IN (${idEjesFiltrados.join(',')})
          AND p.estatus = 1
-         AND p.idLeccion IS NULL   -- preguntas de sección, no de lección individual
+         AND p.idLeccion IS NULL
        ORDER BY p.idSeccion, p.idPregunta ASC`,
       []
     );
  
-    /* ── 9b. Si en tu BD todas las preguntas tienen idLeccion,
-             filtra por sección usando solo idSeccion           */
-    //  Fallback: tomar TODAS las preguntas de la sección
     let pregSecFinal = pregSecRows as any[];
     if (!pregSecFinal.length) {
+      /* Fallback: todas las preguntas de la sección */
       const [pregSecFallback] = await pool.query<RowDataPacket[]>(
-        `SELECT
-           p.idPregunta,
-           p.idSeccion,
-           p.pregunta,
-           p.imagenPregunta,
-           p.tipoPregunta,
-           p.opcionesRespuesta
+        `SELECT p.idPregunta, p.idSeccion, p.pregunta,
+                p.imagenPregunta, p.tipoPregunta, p.opcionesRespuesta
          FROM preguntas p
          JOIN secciones s ON s.idSeccion = p.idSeccion
          WHERE s.idEje IN (${idEjesFiltrados.join(',')})
@@ -174,13 +444,10 @@ export async function getEjes(req: Request, res: Response) {
       pregSecFinal = pregSecFallback as any[];
     }
  
-    /* ── 10. Último resultado de evaluación por sección ──── */
+    /* ── 10. Último resultado de evaluación por sección ────── */
     const [evalRows] = await pool.query<RowDataPacket[]>(
-      `SELECT
-         es.idSeccion,
-         es.calificacion,
-         es.fechaRealizacion,
-         CASE WHEN es.calificacion >= 70 THEN 1 ELSE 0 END AS aprobada
+      `SELECT es.idSeccion, es.calificacion, es.fechaRealizacion,
+              CASE WHEN es.calificacion >= 70 THEN 1 ELSE 0 END AS aprobada
        FROM evaluaciones_seccion es
        WHERE es.idUsuario = ?
          AND es.idSeccion IN (
@@ -190,20 +457,18 @@ export async function getEjes(req: Request, res: Response) {
        ORDER BY es.fechaRealizacion DESC`,
       [usuarioId]
     );
- 
-    // Quedarse solo con la evaluación más reciente por sección
     const evalMap = new Map<number, any>();
     for (const ev of evalRows as any[]) {
       if (!evalMap.has(ev.idSeccion)) {
         evalMap.set(ev.idSeccion, {
-          calificacion:      ev.calificacion,
-          aprobada:          Boolean(ev.aprobada),
-          fechaRealizacion:  ev.fechaRealizacion,
+          calificacion:     ev.calificacion,
+          aprobada:         Boolean(ev.aprobada),
+          fechaRealizacion: ev.fechaRealizacion,
         });
       }
     }
  
-    /* ── 11. Ensamblar árbol final ────────────────────────── */
+    /* ── 11. Ensamblar árbol con marcado de ruta ──────────── */
     const leccionesEnriquecidas = (leccionesRows as any[]).map(l => ({
       idLeccion:      l.idLeccion,
       idSeccion:      l.idSeccion,
@@ -212,23 +477,39 @@ export async function getEjes(req: Request, res: Response) {
       ...buildUrls(l.codigoLeccion),
       vista:          Boolean(l.vista),
       totalPreguntas: pregLecMap.get(l.idLeccion) ?? 0,
+      /*
+       * enRuta:
+       * · true  → lección incluida en la ruta personalizada (resaltar)
+       * · false → lección no prioritaria en esta ruta
+       * · null  → ruta estándar, no aplica distinción
+       */
+      enRuta: codigosEnRuta === null
+        ? null
+        : codigosEnRuta.has(l.codigoLeccion),
     }));
+ 
+    const parseOpciones = (raw: any) =>
+      Array.isArray(raw)
+        ? raw
+        : (() => { try { return JSON.parse(raw ?? '[]'); } catch { return []; } })();
  
     const seccionesEnriquecidas = todasLasSecciones
       .filter(s => idEjesFiltrados.includes(s.idEje))
       .map(s => {
+        const lecsSeccion     = leccionesEnriquecidas.filter(l => l.idSeccion === s.idSeccion);
+        const leccionesEnRuta = codigosEnRuta
+          ? lecsSeccion.filter(l => l.enRuta).length
+          : null;
+ 
         const preguntasSeccion = pregSecFinal
           .filter(p => p.idSeccion === s.idSeccion)
           .map(p => ({
-            idPregunta:        p.idPregunta,
-            pregunta:          p.pregunta,
-            imagenPregunta:    p.imagenPregunta ?? null,
-            tipoPregunta:      p.tipoPregunta,
-            // Parsear JSON si viene como string
-            opciones: Array.isArray(p.opcionesRespuesta)
-              ? p.opcionesRespuesta
-              : (() => { try { return JSON.parse(p.opcionesRespuesta ?? '[]'); } catch { return []; } })(),
-            // respuestaCorrecta ← NUNCA se incluye
+            idPregunta:     p.idPregunta,
+            pregunta:       p.pregunta,
+            imagenPregunta: p.imagenPregunta ?? null,
+            tipoPregunta:   p.tipoPregunta,
+            opciones:       parseOpciones(p.opcionesRespuesta),
+            /* respuestaCorrecta ← NUNCA se incluye */
           }));
  
         return {
@@ -239,29 +520,38 @@ export async function getEjes(req: Request, res: Response) {
           nivel:              s.nivel,
           cantidadLecciones:  s.cantidadLecciones,
           realizada:          secRealizadasSet.has(s.idSeccion),
-          lecciones:          leccionesEnriquecidas.filter(l => l.idSeccion === s.idSeccion),
-          // Evaluación de la sección
+          /* Cuántas lecciones de esta sección están en la ruta personalizada */
+          leccionesEnRuta,
+          lecciones:          lecsSeccion,
           evaluacionSeccion: {
-            totalPreguntas: preguntasSeccion.length,
-            preguntas:      preguntasSeccion,
+            totalPreguntas:  preguntasSeccion.length,
+            preguntas:       preguntasSeccion,
             ultimoResultado: evalMap.get(s.idSeccion) ?? null,
           },
         };
       });
  
-    const arbol = ejesFiltrados.map((e, idx) => ({
-      idEje:             e.idEje,
-      codigoEje:         e.codigoEje,
-      nombre:            e.nombre,
-      descripcion:       e.descripcion,
-      cantidadSecciones: e.cantidadSecciones,
-      completado:        ejeCompletadoMap.get(e.idEje) ?? false,
-      // Indica si este eje está disponible o es "el siguiente por desbloquear"
-      disponible:        true,
-      secciones:         seccionesEnriquecidas.filter(s => s.idEje === e.idEje),
-    }));
+    const arbol = ejesFiltrados.map(e => {
+      const secsEje = seccionesEnriquecidas.filter(s => s.idEje === e.idEje);
+      /* Cuántas lecciones del eje están en la ruta personalizada */
+      const leccionesEjeEnRuta = codigosEnRuta
+        ? secsEje.reduce((acc, s) => acc + (s.leccionesEnRuta ?? 0), 0)
+        : null;
  
-    /* ── 12. Agregar info de ejes bloqueados (sin contenido) */
+      return {
+        idEje:             e.idEje,
+        codigoEje:         e.codigoEje,
+        nombre:            e.nombre,
+        descripcion:       e.descripcion,
+        cantidadSecciones: e.cantidadSecciones,
+        completado:        ejeCompletadoMap.get(e.idEje) ?? false,
+        disponible:        true,
+        leccionesEnRuta:   leccionesEjeEnRuta,
+        secciones:         secsEje,
+      };
+    });
+ 
+    /* ── 12. Ejes bloqueados (sin contenido) ──────────────── */
     const ejesBloqueados = todosLosEjes.slice(ejesAMostrar).map(e => ({
       idEje:             e.idEje,
       codigoEje:         e.codigoEje,
@@ -269,11 +559,18 @@ export async function getEjes(req: Request, res: Response) {
       descripcion:       e.descripcion,
       cantidadSecciones: e.cantidadSecciones,
       completado:        false,
-      disponible:        false,  // ← bloqueado, el frontend puede mostrarlo dimmed
-      secciones:         [],     // sin contenido hasta que se desbloquee
+      disponible:        false,
+      leccionesEnRuta:   null,
+      secciones:         [],
     }));
  
-    return ok(res, [...arbol, ...ejesBloqueados]);
+    /* ── 13. Metadata de la ruta ──────────────────────────── */
+    const rutaInfo = {
+      esPersonalizada:  esRutaDiagnostico,
+      totalEnRuta:      codigosEnRuta?.size ?? null,
+    };
+ 
+    return ok(res, { rutaInfo, ejes: [...arbol, ...ejesBloqueados] });
   } catch (err) {
     return serverError(res, err);
   }

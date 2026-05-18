@@ -9,6 +9,8 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
     return unauthorized(res, 'Token no proporcionado');
   }
   const token = header.slice(7);
+
+  console.log(token)
   try {
     req.usuario = verifyToken(token);
     return next();

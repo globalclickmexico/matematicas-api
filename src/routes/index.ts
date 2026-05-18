@@ -5,6 +5,7 @@ import progresoRoutes  from './progreso.routes';
 import evaluacionRoutes from './evaluacion.routes';
 import insigniasRoutes from './insignias.routes';
 import evaluacionesSeccion from './evaluacion-seccion.routes';
+import diagnosticoRoutes from './diagnostico.routes';
 
 const router: Router = Router();
 
@@ -14,7 +15,8 @@ router.use('/lecciones',   cursoRoutes);
 router.use('/progreso',    progresoRoutes);
 router.use('/evaluaciones', evaluacionRoutes);
 router.use('/evaluaciones/seccion', evaluacionesSeccion)
-router.use('/insignias', insigniasRoutes)
+router.use('/insignias', insigniasRoutes),
+router.use('/diagnostico', diagnosticoRoutes);
 
 /* Health check */
 router.get('/health', (_, res) => res.json({ ok: true, ts: new Date().toISOString() }));
