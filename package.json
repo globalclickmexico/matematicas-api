@@ -13,6 +13,7 @@
     "plantilla": "ts-node scripts/generar-plantilla.ts"
   },
   "dependencies": {
+    "@react-email/components": "^1.0.12",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
@@ -23,6 +24,9 @@
     "morgan": "^1.10.0",
     "multer": "^2.1.1",
     "mysql2": "^3.6.5",
+    "nodemailer": "^8.0.7",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -33,6 +37,9 @@
     "@types/morgan": "^1.9.9",
     "@types/multer": "^1.4.11",
     "@types/node": "^20.10.0",
+    "@types/nodemailer": "^8.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.3.2"

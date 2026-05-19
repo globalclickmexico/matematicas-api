@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import pool from '../db/connection';
-import { signToken } from '../utils/jwt';
+import { signToken, signResetToken } from '../utils/jwt';
 import { ok, fail, serverError, unauthorized } from '../utils/response';
 import { RowDataPacket } from 'mysql2';
+import { sendRecuperarCredenciales } from '../services/email.service';
 
 /* ── POST /api/auth/login ───────────────────────────────────
    Acepta login por nombreUsuario  O  por correo.
@@ -151,6 +152,49 @@ export async function me(req: Request, res: Response) {
       esConvenio:     Boolean(u.esConvenio),
       fechaExpiracion: u.fechaExpiracion,
     });
+  } catch (err) {
+    return serverError(res, err);
+  }
+}
+
+/* ── POST /api/auth/recuperar-credenciales ──────────────────
+   Recibe correo, busca usuario y envía email con link de reset.
+   Siempre responde 200 para evitar enumeración de correos.     */
+export async function recuperarCredenciales(req: Request, res: Response) {
+  try {
+    const { correo } = req.body as { correo?: string };
+
+    console.log('Correo que se recibe de frontend')
+    console.log(correo);
+
+    if (!correo) return fail(res, 'Se requiere el correo electrónico');
+
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT u.idUsuario, p.nombreCompleto, p.correo, c.nombreUsuario
+       FROM perfiles      p
+       JOIN usuarios      u ON u.idPerfil  = p.idPerfil
+       JOIN credenciales  c ON c.idUsuario = u.idUsuario
+       WHERE LOWER(p.correo) = ? AND u.estatus = 1
+       LIMIT 1`,
+      [correo.trim().toLowerCase()]
+    );
+
+    const genericResponse = { message: 'Si el correo está registrado, recibirás instrucciones en breve.' };
+
+    if (!rows[0]) return ok(res, genericResponse);
+
+    const usuario   = rows[0];
+    const token     = signResetToken(usuario.idUsuario);
+    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
+
+    await sendRecuperarCredenciales({
+      to:            process.env.NODE_ENV === "development" ? "gc.desarrollo3@outlook.com" : usuario.correo,
+      nombre:        usuario.nombreCompleto,
+      nombreUsuario: usuario.nombreUsuario,
+      resetLink,
+    });
+
+    return ok(res, genericResponse);
   } catch (err) {
     return serverError(res, err);
   }

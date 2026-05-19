@@ -11,3 +11,20 @@ export function signToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
 export function verifyToken(token: string): JwtPayload {
   return jwt.verify(token, SECRET) as unknown as JwtPayload;
 }
+
+export interface ResetPayload {
+  sub:  number;
+  tipo: 'reset_password';
+  iat?: number;
+  exp?: number;
+}
+
+export function signResetToken(idUsuario: number): string {
+  return jwt.sign({ sub: idUsuario, tipo: 'reset_password' }, SECRET, { expiresIn: '1h' });
+}
+
+export function verifyResetToken(token: string): ResetPayload {
+  const payload = jwt.verify(token, SECRET) as unknown as ResetPayload;
+  if (payload.tipo !== 'reset_password') throw new Error('Token inválido');
+  return payload;
+}
