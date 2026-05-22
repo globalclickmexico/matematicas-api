@@ -25,6 +25,7 @@ export async function validarInsignia(req: Request, res: Response) {
       idSeccion:     number;
     };
 
+    console.log('DATOS DEL USUARIO');
     console.log(usuarioId);
     console.log({codigoLeccion, idSeccion});
 
@@ -128,12 +129,15 @@ export async function validarInsignia(req: Request, res: Response) {
    (obtenida o no) para el alumno autenticado.
    Usado por el componente Logros.
 ══════════════════════════════════════════════════════════ */
-export async function getInsignias(req: Request, res: Response) {
+export async function getInsigniasByPerfil(req: Request, res: Response) {
   try {
     const usuarioId = req.usuario!.sub;
 
+    console.log(usuarioId)
+
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT
+         io.idUsuario,
          i.idInsignia,
          i.nombre,
          i.descripcion,
@@ -144,10 +148,14 @@ export async function getInsignias(req: Request, res: Response) {
        FROM insignias i
        LEFT JOIN insignias_obtenidas io
               ON io.idInsignia = i.idInsignia
-             AND io.idUsuario  = ?
-       ORDER BY i.idInsignia`,
+              WHERE io.idUsuario = ?
+       ORDER BY i.idInsignia `,
       [usuarioId]
     );
+
+    console.log(rows);
+
+    // console.log(rows)
 
     return ok(res, (rows as any[]).map(r => ({
       idInsignia:    r.idInsignia,
@@ -157,6 +165,36 @@ export async function getInsignias(req: Request, res: Response) {
       valor:         r.valor,
       obtenida:      Boolean(r.obtenida),
       fechaObtenida: r.fechaObtenida ?? null,
+    })));
+
+  } catch (err) {
+    return serverError(res, err);
+  }
+}
+
+
+/* ══════════════════════════════════════════════════════════
+   GET /api/insignias
+
+   Devuelve TODAS las insignias del curso con su estado
+   (obtenida o no) para el alumno autenticado.
+   Usado por el componente Logros.
+══════════════════════════════════════════════════════════ */
+export async function getInsignias(req: Request, res: Response) {
+  try {
+
+    const [rows] = await pool.query<RowDataPacket[]>(`SELECT * FROM insignias;`);
+
+    console.log(rows);
+
+    // console.log(rows)
+
+    return ok(res, (rows as any[]).map(r => ({
+      idInsignia:    r.idInsignia,
+      nombre:        r.nombre,
+      descripcion:   r.descripcion,
+      idSeccion:     r.idSeccion,
+      valor:         r.valor,
     })));
 
   } catch (err) {

@@ -2,6 +2,7 @@ import * as React from 'react';
 import {
   Html, Head, Preview, Body, Container,
   Section, Text, Button, Hr, Row, Column,
+  Img,
 } from '@react-email/components';
 
 interface RecuperarCredencialesProps {
@@ -22,11 +23,12 @@ export function RecuperarCredenciales({ nombre, nombreUsuario, resetLink }: Recu
 
           {/* ── Header ─────────────────────────────── */}
           <Section style={header}>
-            <Section style={monogramWrap}>
+            {/* <Section style={monogramWrap}>
               <Text style={monogram}>CM</Text>
-            </Section>
-            <Text style={brandName}>CursoMate</Text>
-            <Text style={brandTagline}>Plataforma de Aprendizaje</Text>
+            </Section> */}
+            {/* <Text style={brandName}>CursoMate</Text> */}
+            <Img src="https://globalclickmexico.com/img/nuevosRecursos/logo-gc-horizontal.png" alt="Global Click México" width="100%" height="auto" />
+            <Text style={brandTagline}>Curso de regularización de matemáticas</Text>
           </Section>
 
           {/* ── Hero badge ─────────────────────────── */}
@@ -180,10 +182,10 @@ const brandTagline: React.CSSProperties = {
 
 /* Hero badge */
 const heroBadge: React.CSSProperties = {
-  backgroundColor: '#1d4ed8',
+  backgroundColor: '#02658c',
   padding: '28px 40px',
   textAlign: 'center' as const,
-  borderBottom: '3px solid #3b82f6',
+  // borderBottom: '3px solid #3b82f6',
 };
 
 const lockIcon: React.CSSProperties = {
@@ -201,7 +203,7 @@ const heroTitle: React.CSSProperties = {
 };
 
 const heroSub: React.CSSProperties = {
-  color: 'rgba(255,255,255,0.75)',
+  color: '#ffffff',
   fontSize: '14px',
   lineHeight: '1.5',
   margin: '0',
@@ -254,7 +256,7 @@ const usernameValue: React.CSSProperties = {
   fontWeight: '800',
   letterSpacing: '0.3px',
   margin: '0 0 6px',
-};
+};  
 
 const usernameHint: React.CSSProperties = {
   color: '#6b7280',
@@ -265,17 +267,17 @@ const usernameHint: React.CSSProperties = {
 /* CTA */
 const ctaSection: React.CSSProperties = {
   textAlign: 'center' as const,
-  margin: '0 0 28px',
+  padding: '20px 0px 20px 0px'
 };
 
 const ctaButton: React.CSSProperties = {
-  background: 'linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%)',
-  color: '#ffffff',
+  background: '#FF9900',
+  color: '#212529',
   fontSize: '16px',
   fontWeight: '700',
   textDecoration: 'none',
   padding: '16px 40px',
-  borderRadius: '10px',
+  borderRadius: '15px',
   display: 'inline-block',
   letterSpacing: '0.2px',
   boxShadow: '0 4px 14px rgba(29,78,216,0.35)',

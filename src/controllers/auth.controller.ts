@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import pool from '../db/connection';
-import { signToken, signResetToken } from '../utils/jwt';
+import { signToken, signResetToken, verifyResetToken } from '../utils/jwt';
 import { ok, fail, serverError, unauthorized } from '../utils/response';
 import { RowDataPacket } from 'mysql2';
 import { sendRecuperarCredenciales } from '../services/email.service';
@@ -195,6 +195,49 @@ export async function recuperarCredenciales(req: Request, res: Response) {
     });
 
     return ok(res, genericResponse);
+  } catch (err) {
+    return serverError(res, err);
+  }
+}
+
+/* ── POST /api/auth/reset-password ─────────────────────────
+   Valida el token de reset y actualiza la contraseña.        */
+export async function resetPassword(req: Request, res: Response) {
+  try {
+    const { token, nuevaContrasenia } = req.body as {
+      token?:            string;
+      nuevaContrasenia?: string;
+    };
+
+    console.log({token, nuevaContrasenia});
+
+    if (!token || !nuevaContrasenia) {
+      return fail(res, 'Se requieren token y nuevaContrasenia');
+    }
+
+    if (nuevaContrasenia.length < 8) {
+      return fail(res, 'La contraseña debe tener al menos 8 caracteres');
+    }
+
+    let payload;
+    try {
+      payload = verifyResetToken(token);
+    } catch {
+      return unauthorized(res, 'Token inválido o expirado');
+    }
+
+    const hash = await bcrypt.hash(nuevaContrasenia, 10);
+
+    const [result] = await pool.query<import('mysql2').ResultSetHeader>(
+      `UPDATE credenciales SET contrasenia = ? WHERE idUsuario = ?`,
+      [hash, payload.sub]
+    );
+
+    if (result.affectedRows === 0) {
+      return fail(res, 'Usuario no encontrado', 404);
+    }
+
+    return ok(res, { message: 'Contraseña actualizada correctamente' });
   } catch (err) {
     return serverError(res, err);
   }

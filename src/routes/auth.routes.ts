@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { login, me, recuperarCredenciales } from '../controllers/auth.controller';
+import { login, me, recuperarCredenciales, resetPassword } from '../controllers/auth.controller';
 import { authMiddleware } from '../middlewares/auth.middleware';
 
 const router: Router = Router();
@@ -12,5 +12,8 @@ router.get('/me', authMiddleware, me);
 
 // POST /api/auth/recuperar-credenciales
 router.post('/recuperar-credenciales', recuperarCredenciales);
+
+// POST /api/auth/reset-password
+router.post('/reset-password', resetPassword);
 
 export default router;

@@ -40,13 +40,21 @@ export async function marcarLeccionVista(req: Request, res: Response) {
     const idCurso = actual.idCurso;
     const ahora   = Math.floor(Date.now() / 1000);
  
-    /* 2. Marcar como vista (INSERT IGNORE = no duplica) */
-    await pool.query(
-      `INSERT IGNORE INTO lecciones_vistas
-         (idCurso, idLeccion, idUsuario, fechaRealizacion)
-       VALUES (?, ?, ?, ?)`,
-      [idCurso, idLeccion, usuarioId, ahora]
+    /* 2. Marcar como vista — un único registro por usuario+lección */
+    const [yaVista] = await pool.query<RowDataPacket[]>(
+      `SELECT idLeccion FROM lecciones_vistas
+       WHERE idLeccion = ? AND idUsuario = ? LIMIT 1`,
+      [idLeccion, usuarioId]
     );
+
+    if (!yaVista[0]) {
+      await pool.query(
+        `INSERT INTO lecciones_vistas
+           (idCurso, idLeccion, idUsuario, fechaRealizacion)
+         VALUES (?, ?, ?, ?)`,
+        [idCurso, idLeccion, usuarioId, ahora]
+      );
+    }
  
     /* 3. Verificar si se completó la sección */
     const [secRows] = await pool.query<RowDataPacket[]>(
