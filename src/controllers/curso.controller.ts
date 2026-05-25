@@ -12,6 +12,7 @@ function buildUrls(codigoLeccion: string) {
     introUrl:      `${CONTENIDO_BASE}/${codigoLeccion}`,
     actividadUrl:  `${CONTENIDO_BASE}/${codigoLeccion}/${codigoLeccion}/genially.html`,
     pdfUrl:        `${CONTENIDO_BASE}/${codigoLeccion}/${codigoLeccion}.pdf`,
+    materialesUrl: `${CONTENIDO_BASE}/${codigoLeccion}/materiales.zip`,
   };
 }
 
